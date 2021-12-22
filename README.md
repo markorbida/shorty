@@ -25,13 +25,26 @@ For **Nginx**, add the following to your server declaration:
         }
     }
 
-4\. Edit the `config.php` file.
+4\. Create `.env` file with the following parms.
+
+    BASE_URL='https://example.com'
+
+    DB_HOST='localhost'
+    DB_USER='admin'
+    DB_PASS='password'
+    DB_NAME='some_db_name'
+
+    CHARS='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+    SALT='salted'
+    PADDING=5
+
+    AUTH_CREDS='{"someuser":"sompassword"}'
 
 ## Generating short URLs
 
 To generate a short URL, simply pass in a `url` query parameter to your Shorty installation:
 
-    http://example.com/?url=http://www.google.com
+    curl -X POST -u 'username:password' http://example.com/?url=http://www.google.com
 
 This will return a shortened URL such as:
 
@@ -42,20 +55,20 @@ When a user opens the short URL they will be redirected to the long URL location
 By default, Shorty will generate an HTML response for all saved URLs.
 You can alter the response format by passing in a `format` query parameter.
 
-    http://example.com/?url=http://www.google.com&format=text
+    curl -X POST -u 'username:password' http://example.com/?url=http://www.google.com&format=text
 
 The possible formats are `html`, `xml`, `text`, and `json`.
 
 ## Whitelist
 
-By default anyone is allowed to enter a new URL for shortening. To restrict the saving of URLs to 
+By default anyone is allowed to enter a new URL for shortening. To restrict the saving of URLs to
 certain IP addresses, use the `allow` function:
 
     $shorty->allow('192.168.0.10');
 
 ## Requirements
 
-* PHP 5.1+
+* PHP 7.1+
 * PDO extension
 
 ## License
