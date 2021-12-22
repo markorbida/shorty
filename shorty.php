@@ -1,4 +1,7 @@
 <?php
+
+use Novutec\WhoisParser\Templates\Nu;
+
 /**
  * Shorty: A simple URL shortener.
  *
@@ -44,6 +47,19 @@ class Shorty {
      * @var array
      */
     private $whitelist = array();
+
+    /**
+     * Group credentials
+     *
+     * @var array
+     */
+    private $credentials = array();
+
+    /**
+     * Account user
+     * @var string
+     */
+    private $user = '';
 
     /**
      * Constructor
@@ -93,6 +109,15 @@ class Shorty {
      */
     public function set_salt($salt) {
         $this->salt = $salt;
+    }
+
+    /**
+     * Sets the credentials
+     *
+     * @param array $creds credentials array
+     */
+    public function set_creds($creds) {
+        $this->credentials = $creds;
     }
 
     /**
@@ -225,9 +250,14 @@ class Shorty {
      */
     public function find($url) {
         $statement = $this->connection->prepare(
-            'SELECT * FROM urls WHERE url = ?'
+            'SELECT * FROM urls WHERE url = ? AND `user` = ?'
         );
-        $statement->execute(array($url));
+
+        try {
+            $statement->execute(array($url, $this->user));
+        } catch (exception $e) {
+            die($e->getMessage());
+        }
 
         return $statement->fetch(PDO::FETCH_ASSOC);
     }
@@ -236,15 +266,21 @@ class Shorty {
      * Stores a URL in the database.
      *
      * @param string $url URL to store
+     * @param array $params db values
      * @return int Insert id
      */
-    public function store($url) {
-        $datetime = date('Y-m-d H:i:s');
+    public function store($url, $params = array()) {
+        $params['user'] = $this->user;
 
         $statement = $this->connection->prepare(
-            'INSERT INTO urls (url, created) VALUES (?,?)'
+            'INSERT INTO urls (url, `params`) VALUES (?, CAST(? AS JSON))'
         );
-        $statement->execute(array($url, $datetime));
+
+        try {
+            $statement->execute(array($url, json_encode($params)));
+        } catch (exception $e) {
+            die($e->getMessage());
+        }
 
         return $this->connection->lastInsertId();
     }
@@ -255,12 +291,10 @@ class Shorty {
      * @param int $id URL id
      */
     public function update($id) {
-        $datetime = date('Y-m-d H:i:s');
-
         $statement = $this->connection->prepare(
-            'UPDATE urls SET hits = hits + 1, accessed = ? WHERE id = ?'
+            'UPDATE urls SET hits = hits + 1 WHERE id = ?'
         );
-        $statement->execute(array($datetime, $id));
+        $statement->execute(array($id));
     }
 
     /**
@@ -281,6 +315,16 @@ class Shorty {
         exit(
             '<h1>404 Not Found</h1>'.
             str_repeat(' ', 512)
+        );
+    }
+
+    /**
+     * Sends a 403 response.
+     */
+    public function not_allowed() {
+        header('HTTP/1.0 403 Forbidden');
+        exit(
+            '<h1>You are not allowed here.</h1>'
         );
     }
 
@@ -308,11 +352,41 @@ class Shorty {
     }
 
     /**
+     * Do Basic auth validation
+     */
+    public function auth_validate_basic(){
+        $return = false;
+        if(!empty($this->credentials) && isset($_SERVER['PHP_AUTH_USER']) && isset($_SERVER['PHP_AUTH_PW'])){
+            if(isset($this->credentials[$_SERVER['PHP_AUTH_USER']])
+                && $this->credentials[$_SERVER['PHP_AUTH_USER']] == $_SERVER['PHP_AUTH_PW']){
+
+                $this->user = $_SERVER['PHP_AUTH_USER'];
+                $return = true;
+
+            }
+        }
+
+        return $return;
+    }
+
+    /**
      * Starts the program.
      */
-    public function run() {
-        $q = str_replace('/', '', $_GET['q']);
+    public function run(){
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $this->run_post();
+        }elseif($_SERVER['REQUEST_METHOD'] === 'GET'){
+            $this->run_get();
+        }else{
+            die("Invalid request.\n");
+        }
+    }
 
+    /**
+     * Run POST request
+     * @return void
+     */
+    public function run_post(){
         $url = '';
         if (isset($_GET['url'])) {
           $url = urldecode($_GET['url']);
@@ -328,14 +402,33 @@ class Shorty {
             if (!empty($this->whitelist) && !in_array($_SERVER['REMOTE_ADDR'], $this->whitelist)) {
                 $this->error('Not allowed.');
             }
+            // Basic auth
+            if(!$this->auth_validate_basic()){
+                $this->not_allowed();
+                exit();
+            }
 
             if (preg_match('/^http[s]?\:\/\/[\w]+/', $url)) {
                 $result = $this->find($url);
 
                 // Not found, so save it
                 if (empty($result)) {
+                    $id = null;
+                    $params = file_get_contents('php://input');
 
-                    $id = $this->store($url);
+                    if(!empty($params)){
+                        try {
+                            $params = json_decode($params, true);
+                            $id = $this->store($url, $params);
+                        } catch (\Throwable $th) {
+                            //throw $th;
+                        }
+                    }else{
+                        $id = $this->store($url);
+                    }
+
+
+
 
                     $url = $this->hostname.'/'.$this->encode($id);
                 }
@@ -360,35 +453,41 @@ class Shorty {
                             '  <url>'.htmlentities($url).'</url>',
                             '</response>'
                         )));
-
                     default:
                         exit('<a href="'.$url.'">'.$url.'</a>');
                 }
+            }else {
+                $this->error("URL must include Scheme (https://, http://)\n");
+            }
+        }else{
+            die("Unknown request.\n");
+        }
+    }
+
+    /**
+     * Run GET request
+     * @return void
+     */
+    public function run_get() {
+        $q = str_replace('/', '', $_GET['q']);
+
+        if (empty($q)) {
+            $this->not_found();
+            return;
+        }
+
+        if (preg_match('/^([a-zA-Z0-9]+)$/', $q, $matches)) {
+            $id = self::decode($matches[1]);
+
+            $result = $this->fetch($id);
+
+            if (!empty($result)) {
+                $this->update($id);
+
+                $this->redirect($result['url']);
             }
             else {
-                $this->error('Bad input.');
-            }
-        }
-        // Lookup by id
-        else {
-            if (empty($q)) {
-              $this->not_found();
-              return;
-            }
-
-            if (preg_match('/^([a-zA-Z0-9]+)$/', $q, $matches)) {
-                $id = self::decode($matches[1]);
-
-                $result = $this->fetch($id);
-
-                if (!empty($result)) {
-                    $this->update($id);
-
-                    $this->redirect($result['url']);
-                }
-                else {
-                    $this->not_found();
-                }
+                $this->not_found();
             }
         }
     }
