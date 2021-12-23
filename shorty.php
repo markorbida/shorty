@@ -1,7 +1,4 @@
 <?php
-
-use Novutec\WhoisParser\Templates\Nu;
-
 /**
  * Shorty: A simple URL shortener.
  *
