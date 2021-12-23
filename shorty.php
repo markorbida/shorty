@@ -402,6 +402,7 @@ class Shorty {
             if (!empty($this->whitelist) && !in_array($_SERVER['REMOTE_ADDR'], $this->whitelist)) {
                 $this->error('Not allowed.');
             }
+
             // Basic auth
             if(!$this->auth_validate_basic()){
                 $this->not_allowed();
@@ -469,26 +470,47 @@ class Shorty {
      * @return void
      */
     public function run_get() {
-        $q = str_replace('/', '', $_GET['q']);
+        if(isset($_GET['q'])){
+            $q = str_replace('/', '', $_GET['q']);
 
-        if (empty($q)) {
-            $this->not_found();
-            return;
-        }
+            if (empty($q)) {
+                $this->not_found();
+                return;
+            }
 
-        if (preg_match('/^([a-zA-Z0-9]+)$/', $q, $matches)) {
-            $id = self::decode($matches[1]);
+            if (preg_match('/^([a-zA-Z0-9]+)$/', $q, $matches)) {
+                $id = self::decode($matches[1]);
+
+                $result = $this->fetch($id);
+
+                if (!empty($result)) {
+                    $this->update($id);
+
+                    $this->redirect($result['url']);
+                }
+                else {
+                    $this->not_found();
+                }
+            }
+        }elseif(isset($_GET['view']) && !empty($_GET['view'])){
+            // Basic auth
+            if(!$this->auth_validate_basic()){
+                $this->not_allowed();
+                exit();
+            }
+
+            $id = self::decode($_GET['view']);
 
             $result = $this->fetch($id);
-
             if (!empty($result)) {
-                $this->update($id);
-
-                $this->redirect($result['url']);
-            }
-            else {
+                header('Content-Type: application/json');
+                exit(json_encode(array('data' => $result)));
+            }else{
                 $this->not_found();
             }
+        }else{
+            die('Invalid request.');
         }
+
     }
 }
